@@ -26,7 +26,10 @@ import numpy as np
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 VIDEO2MIDI = Path(__file__).resolve().parent / "video2midi.py"
-MSCORE = "/Applications/MuseScore 4.app/Contents/MacOS/mscore"
+MSCORE = next(
+    (p for p in ["/Applications/MuseScore 4.app/Contents/MacOS/mscore", shutil.which("mscore4"), shutil.which("mscore"), shutil.which("musescore")] if p and Path(p).exists()),
+    "mscore",
+)
 
 NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
@@ -49,10 +52,29 @@ def is_url(source: str) -> bool:
     return source.startswith("http://") or source.startswith("https://")
 
 
+def _ytdlp() -> List[str]:
+    """yt-dlp command prefix; use Node as the JS runtime only if it's installed."""
+    return ["yt-dlp"] + (["--js-runtimes", "node"] if shutil.which("node") else [])
+
+
+CHECKPOINT = Path.home() / "piano_transcription_inference_data" / "note_F1=0.9677_pedal_F1=0.9186.pth"
+CHECKPOINT_URL = "https://zenodo.org/record/4034264/files/CRNN_note_F1%3D0.9677_pedal_F1%3D0.9186.pth?download=1"
+
+
+def ensure_checkpoint() -> None:
+    """Download the ~170 MB model once (the package's own downloader needs wget)."""
+    if CHECKPOINT.exists() and CHECKPOINT.stat().st_size >= 1.6e8:
+        return
+    import urllib.request
+    CHECKPOINT.parent.mkdir(parents=True, exist_ok=True)
+    print(f"Downloading the transcription model (~170 MB, one time) to {CHECKPOINT} ...")
+    urllib.request.urlretrieve(CHECKPOINT_URL, CHECKPOINT)
+
+
 def get_youtube_title(url: str) -> str:
     """yt-dlp --print title, without downloading anything."""
     out = subprocess.run(
-        ["yt-dlp", "--js-runtimes", "node", "--print", "title", url],
+        _ytdlp() + ["--print", "title", url],
         capture_output=True, text=True, check=True,
     )
     return out.stdout.strip().splitlines()[-1]
@@ -62,7 +84,7 @@ def download_audio(url: str, out_dir: Path) -> Path:
     """yt-dlp-extract the URL's audio as WAV into out_dir/audio.wav."""
     out_tmpl = str(out_dir / "audio.%(ext)s")
     subprocess.run(
-        ["yt-dlp", "--js-runtimes", "node", "-x", "--audio-format", "wav", "-o", out_tmpl, url],
+        _ytdlp() + ["-x", "--audio-format", "wav", "-o", out_tmpl, url],
         check=True,
     )
     wav_path = out_dir / "audio.wav"
@@ -79,6 +101,7 @@ def transcribe(audio_path: Path, out_path: Path) -> None:
 
     # librosa.load (not the package's own load_audio, which is broken on new librosa).
     audio, _ = librosa.load(str(audio_path), sr=sample_rate, mono=True)
+    ensure_checkpoint()
     transcriptor = PianoTranscription(device="cpu", checkpoint_path=None)
     result = transcriptor.transcribe(audio, str(out_path))
     print(
@@ -175,9 +198,9 @@ def build_notes_json(events: List[dict], bpm: float, max_held_beats: float, out_
 
 
 def run_video2midi_export(notes_path: Path, out_mid: Path, bpm: float, title: str, fill_rest_max_beats: float) -> None:
-    """Shell out to video2midi.py export with system python3 (has mido/music21/numpy)."""
+    """Shell out to video2midi.py export with the same Python interpreter."""
     cmd = [
-        "python3", str(VIDEO2MIDI), "export",
+        sys.executable, str(VIDEO2MIDI), "export",
         "--notes", str(notes_path), "--out", str(out_mid),
         "--bpm", str(bpm), "--format", "both", "--title", title,
         "--fill-rest-max-beats", str(fill_rest_max_beats),
