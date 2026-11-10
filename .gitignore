@@ -1,0 +1,14 @@
+__pycache__/
+*.mp4
+*.wav
+*.mid
+*.musicxml
+*.mscz
+*.pdf
+*.png
+*.json
+frames/
+debug/
+out/
+.venv/
+.DS_Store

@@ -1,0 +1,9 @@
+numpy
+opencv-python
+mido
+music21
+# audio -> sheet music (yt2score.py / transcribe.py)
+torch
+librosa
+piano_transcription_inference
+yt-dlp
